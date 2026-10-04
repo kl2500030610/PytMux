@@ -12,6 +12,7 @@ int main(void)
 {
     Multiplexer mux;
     int command_mode = 0;
+    int running = 1;
 
     multiplexer_init(&mux);
 
@@ -23,7 +24,7 @@ int main(void)
         return EXIT_FAILURE;
     }
 
-    while (1) {
+    while (running) {
         Session *active;
         fd_set read_fds;
 
@@ -71,18 +72,21 @@ int main(void)
                 char ch = buffer[i];
 
                 /*
-                 * Ctrl-B starts command mode.
+                 * Ctrl-B starts PtyMux command mode.
                  */
                 if (!command_mode && ch == 2) {
                     command_mode = 1;
 
+                    /*
+                     * Clear the current shell input line.
+                     */
                     const char *message =
-                        "\r\n[PtyMux] ";
+                        "\r\033[2K[PtyMux] ";
 
                     write(
                         STDOUT_FILENO,
                         message,
-                        11
+                        13
                     );
 
                     continue;
@@ -95,7 +99,7 @@ int main(void)
                     command_mode = 0;
 
                     /*
-                     * 0-9 -> switch session
+                     * Switch session: 0-9
                      */
                     if (ch >= '0' && ch <= '9') {
                         int session_id = ch - '0';
@@ -110,7 +114,7 @@ int main(void)
                             int len = snprintf(
                                 message,
                                 sizeof(message),
-                                "\r\n[Switched to session %d]\r\n",
+                                "\r\033[2K[Switched to session %d]\r\n",
                                 session_id
                             );
 
@@ -121,12 +125,12 @@ int main(void)
                             );
                         } else {
                             const char *message =
-                                "\r\n[Invalid session]\r\n";
+                                "\r\033[2K[Invalid session]\r\n";
 
                             write(
                                 STDOUT_FILENO,
                                 message,
-                                21
+                                24
                             );
                         }
 
@@ -134,7 +138,7 @@ int main(void)
                     }
 
                     /*
-                     * c -> create session
+                     * Create session.
                      */
                     if (ch == 'c') {
                         if (handle_command(
@@ -146,7 +150,7 @@ int main(void)
                     }
 
                     /*
-                     * l -> list sessions
+                     * List sessions.
                      */
                     if (ch == 'l') {
                         if (handle_command(
@@ -158,49 +162,49 @@ int main(void)
                     }
 
                     /*
-                     * q -> quit
+                     * Quit PtyMux.
                      */
                     if (ch == 'q') {
-                        if (handle_command(
-                                &mux,
-                                'q'
-                            ) == -1) {
-                            goto cleanup;
-                        }
+                        running = 0;
+                        continue;
                     }
 
                     /*
                      * Unknown command.
                      */
-                    const char *message =
-                        "\r\n[Unknown command]\r\n";
+                    {
+                        const char *message =
+                            "\r\033[2K[Unknown command]\r\n";
 
-                    write(
-                        STDOUT_FILENO,
-                        message,
-                        21
-                    );
+                        write(
+                            STDOUT_FILENO,
+                            message,
+                            23
+                        );
+                    }
 
                     continue;
                 }
 
                 /*
-                 * Normal keyboard input -> active PTY
+                 * Normal keyboard input -> active PTY.
                  */
                 if (write(
                         active->master_fd,
                         &ch,
                         1
                     ) == -1) {
-                    goto cleanup;
+                    running = 0;
+                    break;
                 }
             }
         }
 
         /*
-         * Active PTY -> terminal
+         * Active PTY -> terminal.
          */
-        if (FD_ISSET(
+        if (running &&
+            FD_ISSET(
                 active->master_fd,
                 &read_fds
             )) {
@@ -229,12 +233,10 @@ int main(void)
                     buffer,
                     n
                 ) == -1) {
-                goto cleanup;
+                running = 0;
             }
         }
     }
-
-cleanup:
 
     terminal_restore();
 

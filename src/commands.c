@@ -31,7 +31,7 @@ int handle_command(
 
             if (id == -1) {
                 const char *message =
-                    "\r\n[Failed to create session]\r\n";
+                    "\r\033[2K[Failed to create session]\r\n";
 
                 write(
                     STDOUT_FILENO,
@@ -47,7 +47,7 @@ int handle_command(
             int len = snprintf(
                 message,
                 sizeof(message),
-                "\r\n[Created session %d]\r\n",
+                "\r\033[2K[Created session %d]\r\n",
                 id
             );
 
@@ -63,20 +63,6 @@ int handle_command(
     case 'l':
         multiplexer_list_sessions(mux);
         return 1;
-
-    case 'q':
-        {
-            const char *message =
-                "\r\n[Exiting PtyMux]\r\n";
-
-            write(
-                STDOUT_FILENO,
-                message,
-                20
-            );
-
-            return -1;
-        }
 
     default:
         return 0;
