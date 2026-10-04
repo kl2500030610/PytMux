@@ -1,42 +1,45 @@
-#include "pty.h"
+#include "multiplexer.h"
 #include "terminal.h"
-#include "session.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/select.h>
-#include <sys/wait.h>
 #include <errno.h>
 
 int main(void)
 {
-    Session session;
+    Multiplexer mux;
 
-    session_init(&session, 0, "bash");
+    multiplexer_init(&mux);
 
     if (terminal_raw_mode() == -1)
         return EXIT_FAILURE;
 
-    session.master_fd = create_pty_shell(&session.pid);
-
-    if (session.master_fd == -1) {
+    if (multiplexer_create_session(&mux, "bash-0") == -1) {
         terminal_restore();
         return EXIT_FAILURE;
     }
 
-    session.state = SESSION_RUNNING;
-
-    while (session_is_alive(&session)) {
+    while (1) {
+        Session *active;
         fd_set read_fds;
+        int max_fd;
+
+        active = multiplexer_get_active(&mux);
+
+        if (active == NULL)
+            break;
 
         FD_ZERO(&read_fds);
 
         FD_SET(STDIN_FILENO, &read_fds);
-        FD_SET(session.master_fd, &read_fds);
+        FD_SET(active->master_fd, &read_fds);
+
+        max_fd = active->master_fd;
 
         if (select(
-                session.master_fd + 1,
+                max_fd + 1,
                 &read_fds,
                 NULL,
                 NULL,
@@ -50,7 +53,7 @@ int main(void)
             break;
         }
 
-        /* Keyboard → PTY */
+        /* Keyboard -> active session */
         if (FD_ISSET(STDIN_FILENO, &read_fds)) {
             char buffer[4096];
 
@@ -63,8 +66,46 @@ int main(void)
             if (n <= 0)
                 break;
 
+            /*
+             * W3 session switching:
+             *
+             * Ctrl-B followed by a number will
+             * switch to that session.
+             */
+
+            if (n == 2 &&
+                buffer[0] == 2 &&
+                buffer[1] >= '0' &&
+                buffer[1] <= '9') {
+
+                int session_id = buffer[1] - '0';
+
+                if (multiplexer_switch_session(
+                        &mux,
+                        session_id
+                    ) == 0) {
+
+                    char message[128];
+
+                    int len = snprintf(
+                        message,
+                        sizeof(message),
+                        "\r\n[Switched to session %d]\r\n",
+                        session_id
+                    );
+
+                    write(
+                        STDOUT_FILENO,
+                        message,
+                        len
+                    );
+                }
+
+                continue;
+            }
+
             if (write(
-                    session.master_fd,
+                    active->master_fd,
                     buffer,
                     n
                 ) == -1) {
@@ -72,29 +113,31 @@ int main(void)
             }
         }
 
-        /* PTY → Terminal */
-        if (FD_ISSET(session.master_fd, &read_fds)) {
+        /* Active PTY -> terminal */
+        if (FD_ISSET(
+                active->master_fd,
+                &read_fds
+            )) {
+
             char buffer[4096];
 
             ssize_t n = read(
-                session.master_fd,
+                active->master_fd,
                 buffer,
                 sizeof(buffer)
             );
 
             if (n <= 0) {
-                session.state = SESSION_DEAD;
-                break;
+                active->state = SESSION_DEAD;
+                continue;
             }
 
-            /* Store output in session buffer */
             session_buffer_write(
-                &session,
+                active,
                 buffer,
                 n
             );
 
-            /* Display output */
             if (write(
                     STDOUT_FILENO,
                     buffer,
@@ -107,14 +150,7 @@ int main(void)
 
     terminal_restore();
 
-    if (session.master_fd != -1) {
-        close(session.master_fd);
-        session.master_fd = -1;
-    }
-
-    waitpid(session.pid, NULL, 0);
-
-    session.state = SESSION_DEAD;
+    multiplexer_cleanup(&mux);
 
     return EXIT_SUCCESS;
 }

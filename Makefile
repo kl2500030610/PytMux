@@ -6,7 +6,8 @@ TARGET = ptymux
 SRC = src/main.c \
       src/pty.c \
       src/terminal.c \
-      src/session.c
+      src/session.c \
+      src/multiplexer.c
 
 OBJ = $(SRC:.c=.o)
 
