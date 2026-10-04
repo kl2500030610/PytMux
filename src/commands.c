@@ -89,7 +89,11 @@ int execute_command(
         }
 
         case COMMAND_LIST:
-            multiplexer_list_sessions(mux);
+
+            multiplexer_list_sessions(
+                mux
+            );
+
             break;
 
         case COMMAND_SWITCH:
@@ -114,18 +118,17 @@ int execute_command(
             break;
 
         case COMMAND_SCROLLBACK:
-            /*
-             * Scrollback mode is handled
-             * by main.c.
-             */
+
             return 1;
 
         case COMMAND_QUIT:
+
             return -1;
 
         case COMMAND_LITERAL_PREFIX:
         case COMMAND_NONE:
         default:
+
             break;
     }
 

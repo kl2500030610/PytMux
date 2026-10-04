@@ -25,6 +25,7 @@ void session_init(
 
     session->buffer_start = 0;
     session->buffer_end = 0;
+    session->buffer_count = 0;
     session->has_unread_output = 0;
 
     if (name != NULL) {
@@ -57,6 +58,7 @@ void session_reset(
 
     session->buffer_start = 0;
     session->buffer_end = 0;
+    session->buffer_count = 0;
     session->has_unread_output = 0;
 }
 
@@ -90,8 +92,12 @@ int session_buffer_write(
             (session->buffer_end + 1)
             % OUTPUT_BUFFER_SIZE;
 
-        if (session->buffer_end ==
-            session->buffer_start) {
+        if (session->buffer_count <
+            OUTPUT_BUFFER_SIZE) {
+
+            session->buffer_count++;
+
+        } else {
 
             session->buffer_start =
                 (session->buffer_start + 1)
@@ -118,10 +124,10 @@ size_t session_buffer_read(
         return 0;
 
     while (
-        session->buffer_start !=
-            session->buffer_end &&
+        session->buffer_count > 0 &&
         count < size
     ) {
+
         data[count++] =
             session->output_buffer[
                 session->buffer_start
@@ -130,12 +136,44 @@ size_t session_buffer_read(
         session->buffer_start =
             (session->buffer_start + 1)
             % OUTPUT_BUFFER_SIZE;
+
+        session->buffer_count--;
     }
 
-    if (session->buffer_start ==
-        session->buffer_end) {
-
+    if (session->buffer_count == 0) {
         session->has_unread_output = 0;
+    }
+
+    return count;
+}
+
+size_t session_buffer_peek(
+    const Session *session,
+    char *data,
+    size_t size
+)
+{
+    size_t count = 0;
+    size_t position;
+
+    if (session == NULL ||
+        data == NULL ||
+        size == 0)
+        return 0;
+
+    position = session->buffer_start;
+
+    while (
+        count < size &&
+        count < session->buffer_count
+    ) {
+
+        data[count++] =
+            session->output_buffer[position];
+
+        position =
+            (position + 1)
+            % OUTPUT_BUFFER_SIZE;
     }
 
     return count;
@@ -148,14 +186,5 @@ size_t session_buffer_size(
     if (session == NULL)
         return 0;
 
-    if (session->buffer_end >=
-        session->buffer_start) {
-
-        return session->buffer_end -
-               session->buffer_start;
-    }
-
-    return OUTPUT_BUFFER_SIZE -
-           session->buffer_start +
-           session->buffer_end;
+    return session->buffer_count;
 }

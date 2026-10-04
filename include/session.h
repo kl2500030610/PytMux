@@ -26,6 +26,7 @@ typedef struct {
 
     size_t buffer_start;
     size_t buffer_end;
+    size_t buffer_count;
 
     int has_unread_output;
 
@@ -53,6 +54,12 @@ int session_buffer_write(
 
 size_t session_buffer_read(
     Session *session,
+    char *data,
+    size_t size
+);
+
+size_t session_buffer_peek(
+    const Session *session,
     char *data,
     size_t size
 );

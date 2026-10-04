@@ -18,7 +18,9 @@ static void handle_sigwinch(int signal)
     resize_pending = 1;
 }
 
-static void update_terminal_size(Session *session)
+static void update_terminal_size(
+    Session *session
+)
 {
     int rows;
     int cols;
@@ -26,7 +28,10 @@ static void update_terminal_size(Session *session)
     if (session == NULL)
         return;
 
-    if (terminal_get_size(&rows, &cols) == -1)
+    if (terminal_get_size(
+            &rows,
+            &cols
+        ) == -1)
         return;
 
     pty_set_size(
@@ -37,43 +42,67 @@ static void update_terminal_size(Session *session)
 }
 
 /*
- * Display buffered output when returning
- * to a session.
+ * Display the complete current
+ * scrollback buffer without
+ * destroying it.
  */
-static void display_session_buffer(
+static void display_scrollback(
     Session *session
 )
 {
     char buffer[4096];
-    size_t n;
 
-    if (session == NULL)
-        return;
+    size_t total =
+        session_buffer_size(
+            session
+        );
 
-    while ((n = session_buffer_read(
+    size_t position = 0;
+
+    while (position < total) {
+
+        size_t remaining =
+            total - position;
+
+        size_t chunk =
+            remaining < sizeof(buffer)
+                ? remaining
+                : sizeof(buffer);
+
+        size_t n =
+            session_buffer_peek(
                 session,
                 buffer,
-                sizeof(buffer)
-            )) > 0) {
+                total
+            );
 
+        if (n == 0)
+            break;
+
+        /*
+         * Only write the requested
+         * chunk.
+         */
         if (write(
                 STDOUT_FILENO,
-                buffer,
-                n
+                buffer + position,
+                chunk
             ) == -1) {
 
-            return;
+            break;
         }
-    }
 
-    session->has_unread_output = 0;
+        position += chunk;
+    }
 }
 
 /*
- * Simple W7 scrollback mode.
+ * Basic W7 scrollback mode.
  *
- * The current buffer is displayed from
- * oldest to newest. Press q to leave.
+ * The buffer is preserved.
+ *
+ * q = exit
+ * r = refresh
  */
 static void enter_scrollback(
     Session *session
@@ -85,21 +114,20 @@ static void enter_scrollback(
     terminal_restore();
 
     printf(
-        "\n[PtyMux] Scrollback mode - "
-        "press q to exit\n"
+        "\n[PtyMux] Scrollback mode\n"
+        "[PtyMux] Press r to refresh, q to exit\n\n"
     );
 
-    display_session_buffer(session);
+    display_scrollback(
+        session
+    );
 
     printf(
-        "\n[PtyMux] End of scrollback\n"
+        "\n\n[PtyMux] End of scrollback\n"
     );
 
     fflush(stdout);
 
-    /*
-     * Wait for q.
-     */
     char ch;
 
     while (read(
@@ -113,11 +141,31 @@ static void enter_scrollback(
 
             break;
         }
+
+        if (ch == 'r' ||
+            ch == 'R') {
+
+            printf(
+                "\033[2J\033[H"
+            );
+
+            display_scrollback(
+                session
+            );
+
+            printf(
+                "\n\n[PtyMux] End of scrollback\n"
+            );
+
+            fflush(stdout);
+        }
     }
 
     terminal_raw_mode();
 
-    update_terminal_size(session);
+    update_terminal_size(
+        session
+    );
 }
 
 int main(void)
@@ -127,7 +175,9 @@ int main(void)
     int command_mode = 0;
     int running = 1;
 
-    multiplexer_init(&mux);
+    multiplexer_init(
+        &mux
+    );
 
     if (terminal_raw_mode() == -1)
         return EXIT_FAILURE;
@@ -147,7 +197,9 @@ int main(void)
     }
 
     update_terminal_size(
-        multiplexer_get_active(&mux)
+        multiplexer_get_active(
+            &mux
+        )
     );
 
     while (running) {
@@ -160,7 +212,7 @@ int main(void)
         int session_switched = 0;
 
         /*
-         * Handle terminal resize.
+         * Handle resize.
          */
         if (resize_pending) {
 
@@ -184,7 +236,9 @@ int main(void)
             }
         }
 
-        FD_ZERO(&read_fds);
+        FD_ZERO(
+            &read_fds
+        );
 
         /*
          * Keyboard.
@@ -195,7 +249,7 @@ int main(void)
         );
 
         /*
-         * All session PTYs.
+         * All PTYs.
          */
         for (int i = 0;
              i < mux.session_count;
@@ -206,10 +260,8 @@ int main(void)
 
             if (!session_is_alive(
                     session
-                )) {
-
+                ))
                 continue;
-            }
 
             FD_SET(
                 session->master_fd,
@@ -224,9 +276,6 @@ int main(void)
             }
         }
 
-        /*
-         * Wait for input/output.
-         */
         if (select(
                 max_fd + 1,
                 &read_fds,
@@ -295,7 +344,9 @@ int main(void)
                 if (command_mode) {
 
                     Command command =
-                        parse_command(ch);
+                        parse_command(
+                            ch
+                        );
 
                     command_mode = 0;
 
@@ -325,12 +376,6 @@ int main(void)
                     }
 
                     /*
-                     * Save current session.
-                     */
-                    int old_session =
-                        mux.active_session;
-
-                    /*
                      * Scrollback.
                      */
                     if (command.type ==
@@ -349,8 +394,11 @@ int main(void)
                     }
 
                     /*
-                     * Execute normal command.
+                     * Remember active session.
                      */
+                    int old_session =
+                        mux.active_session;
+
                     int result =
                         execute_command(
                             &mux,
@@ -377,15 +425,6 @@ int main(void)
                             );
 
                         update_terminal_size(
-                            active
-                        );
-
-                        /*
-                         * Display buffered output
-                         * from the newly active
-                         * session.
-                         */
-                        display_session_buffer(
                             active
                         );
                     }
@@ -417,7 +456,7 @@ int main(void)
         }
 
         /*
-         * Read output from all PTYs.
+         * Read output from all sessions.
          */
         for (int i = 0;
              i < mux.session_count;
@@ -428,18 +467,14 @@ int main(void)
 
             if (!session_is_alive(
                     session
-                )) {
-
+                ))
                 continue;
-            }
 
             if (!FD_ISSET(
                     session->master_fd,
                     &read_fds
-                )) {
-
+                ))
                 continue;
-            }
 
             char buffer[4096];
 
@@ -459,7 +494,7 @@ int main(void)
             }
 
             /*
-             * Always buffer output.
+             * Always preserve output.
              */
             session_buffer_write(
                 session,
@@ -468,8 +503,7 @@ int main(void)
             );
 
             /*
-             * Only display output from
-             * the active session.
+             * Display only active session.
              */
             if (!session_switched &&
                 session->id ==
@@ -493,7 +527,9 @@ int main(void)
 
     terminal_restore();
 
-    multiplexer_cleanup(&mux);
+    multiplexer_cleanup(
+        &mux
+    );
 
     return EXIT_SUCCESS;
 }
