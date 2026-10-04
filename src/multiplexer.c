@@ -67,7 +67,9 @@ int multiplexer_switch_session(
         session_id >= mux->session_count)
         return -1;
 
-    if (!session_is_alive(&mux->sessions[session_id]))
+    if (!session_is_alive(
+            &mux->sessions[session_id]
+        ))
         return -1;
 
     mux->active_session = session_id;
@@ -85,7 +87,8 @@ void multiplexer_list_sessions(
     printf("\nSessions:\n");
 
     for (int i = 0; i < mux->session_count; i++) {
-        const Session *session = &mux->sessions[i];
+        const Session *session =
+            &mux->sessions[i];
 
         printf(
             "  [%d] %-16s %s%s\n",
@@ -125,12 +128,27 @@ void multiplexer_cleanup(
         return;
 
     for (int i = 0; i < mux->session_count; i++) {
-        Session *session = &mux->sessions[i];
+        Session *session =
+            &mux->sessions[i];
 
         if (session->pid > 0 &&
             session_is_alive(session)) {
-            kill(session->pid, SIGTERM);
-            waitpid(session->pid, NULL, 0);
+
+            kill(
+                session->pid,
+                SIGHUP
+            );
+
+            kill(
+                session->pid,
+                SIGTERM
+            );
+
+            waitpid(
+                session->pid,
+                NULL,
+                0
+            );
         }
 
         session_reset(session);
