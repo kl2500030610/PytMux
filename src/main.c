@@ -42,9 +42,8 @@ static void update_terminal_size(
 }
 
 /*
- * Display the complete current
- * scrollback buffer without
- * destroying it.
+ * Display the current scrollback
+ * without destroying the buffer.
  */
 static void display_scrollback(
     Session *session
@@ -56,6 +55,14 @@ static void display_scrollback(
         session_buffer_size(
             session
         );
+
+    if (total == 0) {
+        printf(
+            "[No scrollback available]\r\n"
+        );
+
+        return;
+    }
 
     size_t position = 0;
 
@@ -79,10 +86,6 @@ static void display_scrollback(
         if (n == 0)
             break;
 
-        /*
-         * Only write the requested
-         * chunk.
-         */
         if (write(
                 STDOUT_FILENO,
                 buffer + position,
@@ -97,12 +100,13 @@ static void display_scrollback(
 }
 
 /*
- * Basic W7 scrollback mode.
- *
- * The buffer is preserved.
+ * W7 scrollback mode.
  *
  * q = exit
  * r = refresh
+ *
+ * The terminal remains in raw mode
+ * so q is detected immediately.
  */
 static void enter_scrollback(
     Session *session
@@ -111,11 +115,11 @@ static void enter_scrollback(
     if (session == NULL)
         return;
 
-    terminal_restore();
-
     printf(
-        "\n[PtyMux] Scrollback mode\n"
-        "[PtyMux] Press r to refresh, q to exit\n\n"
+        "\r\n"
+        "[PtyMux] Scrollback mode\r\n"
+        "[PtyMux] Press q to exit, r to refresh\r\n"
+        "\r\n"
     );
 
     display_scrollback(
@@ -123,7 +127,8 @@ static void enter_scrollback(
     );
 
     printf(
-        "\n\n[PtyMux] End of scrollback\n"
+        "\r\n"
+        "[PtyMux] End of scrollback\r\n"
     );
 
     fflush(stdout);
@@ -136,12 +141,19 @@ static void enter_scrollback(
                1
            ) == 1) {
 
+        /*
+         * Exit immediately when q
+         * is pressed.
+         */
         if (ch == 'q' ||
             ch == 'Q') {
 
             break;
         }
 
+        /*
+         * Refresh the scrollback.
+         */
         if (ch == 'r' ||
             ch == 'R') {
 
@@ -154,13 +166,18 @@ static void enter_scrollback(
             );
 
             printf(
-                "\n\n[PtyMux] End of scrollback\n"
+                "\r\n"
+                "[PtyMux] End of scrollback\r\n"
             );
 
             fflush(stdout);
         }
     }
 
+    /*
+     * Make sure PtyMux is back
+     * in raw terminal mode.
+     */
     terminal_raw_mode();
 
     update_terminal_size(
@@ -193,6 +210,7 @@ int main(void)
         ) == -1) {
 
         terminal_restore();
+
         return EXIT_FAILURE;
     }
 
@@ -212,7 +230,7 @@ int main(void)
         int session_switched = 0;
 
         /*
-         * Handle resize.
+         * Handle terminal resize.
          */
         if (resize_pending) {
 
@@ -249,7 +267,7 @@ int main(void)
         );
 
         /*
-         * All PTYs.
+         * Monitor every running PTY.
          */
         for (int i = 0;
              i < mux.session_count;
@@ -276,6 +294,10 @@ int main(void)
             }
         }
 
+        /*
+         * Wait for keyboard or PTY
+         * activity.
+         */
         if (select(
                 max_fd + 1,
                 &read_fds,
@@ -288,6 +310,7 @@ int main(void)
                 continue;
 
             perror("select");
+
             break;
         }
 
@@ -319,7 +342,7 @@ int main(void)
                     buffer[i];
 
                 /*
-                 * Ctrl-B.
+                 * Ctrl-B starts command mode.
                  */
                 if (!command_mode &&
                     ch == 2) {
@@ -376,7 +399,7 @@ int main(void)
                     }
 
                     /*
-                     * Scrollback.
+                     * Enter scrollback mode.
                      */
                     if (command.type ==
                         COMMAND_SCROLLBACK) {
@@ -394,7 +417,9 @@ int main(void)
                     }
 
                     /*
-                     * Remember active session.
+                     * Remember the active
+                     * session before executing
+                     * the command.
                      */
                     int old_session =
                         mux.active_session;
@@ -405,14 +430,18 @@ int main(void)
                             command
                         );
 
+                    /*
+                     * Quit.
+                     */
                     if (result == -1) {
 
                         running = 0;
+
                         break;
                     }
 
                     /*
-                     * Detect session switch.
+                     * Detect a session switch.
                      */
                     if (mux.active_session !=
                         old_session) {
@@ -433,7 +462,8 @@ int main(void)
                 }
 
                 /*
-                 * Normal keyboard input.
+                 * Normal keyboard input goes
+                 * to the active session.
                  */
                 Session *active =
                     multiplexer_get_active(
@@ -450,13 +480,14 @@ int main(void)
                     ) == -1) {
 
                     running = 0;
+
                     break;
                 }
             }
         }
 
         /*
-         * Read output from all sessions.
+         * Read output from every PTY.
          */
         for (int i = 0;
              i < mux.session_count;
@@ -494,7 +525,7 @@ int main(void)
             }
 
             /*
-             * Always preserve output.
+             * Always save output.
              */
             session_buffer_write(
                 session,
@@ -503,7 +534,12 @@ int main(void)
             );
 
             /*
-             * Display only active session.
+             * Only display output from
+             * the active session.
+             *
+             * If a session switch happened
+             * during this select() iteration,
+             * don't display stale output.
              */
             if (!session_switched &&
                 session->id ==
@@ -519,6 +555,7 @@ int main(void)
                     ) == -1) {
 
                     running = 0;
+
                     break;
                 }
             }
