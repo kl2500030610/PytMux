@@ -1,0 +1,5 @@
+*.o
+ptymux
+gdb.txt
+valgrind.log
+.vscode/
