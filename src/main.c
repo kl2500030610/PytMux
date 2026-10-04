@@ -53,9 +53,6 @@ int main(void)
             break;
         }
 
-        /*
-         * Keyboard input
-         */
         if (FD_ISSET(STDIN_FILENO, &read_fds)) {
             char buffer[4096];
 
@@ -72,16 +69,13 @@ int main(void)
                 char ch = buffer[i];
 
                 /*
-                 * Ctrl-B starts PtyMux command mode.
+                 * Ctrl+B starts command mode.
                  */
                 if (!command_mode && ch == 2) {
                     command_mode = 1;
 
-                    /*
-                     * Clear the current shell input line.
-                     */
                     const char *message =
-                        "\r\033[2K[PtyMux] ";
+                        "\r\033[2K[PtyMux]";
 
                     write(
                         STDOUT_FILENO,
@@ -93,13 +87,21 @@ int main(void)
                 }
 
                 /*
-                 * Handle command after Ctrl-B.
+                 * Handle command after Ctrl+B.
                  */
                 if (command_mode) {
                     command_mode = 0;
 
                     /*
-                     * Switch session: 0-9
+                     * Quit.
+                     */
+                    if (ch == 'q') {
+                        running = 0;
+                        break;
+                    }
+
+                    /*
+                     * Switch session.
                      */
                     if (ch >= '0' && ch <= '9') {
                         int session_id = ch - '0';
@@ -141,31 +143,15 @@ int main(void)
                      * Create session.
                      */
                     if (ch == 'c') {
-                        if (handle_command(
-                                &mux,
-                                'c'
-                            ) == 1) {
-                            continue;
-                        }
+                        handle_command(&mux, 'c');
+                        continue;
                     }
 
                     /*
                      * List sessions.
                      */
                     if (ch == 'l') {
-                        if (handle_command(
-                                &mux,
-                                'l'
-                            ) == 1) {
-                            continue;
-                        }
-                    }
-
-                    /*
-                     * Quit PtyMux.
-                     */
-                    if (ch == 'q') {
-                        running = 0;
+                        handle_command(&mux, 'l');
                         continue;
                     }
 
@@ -194,6 +180,7 @@ int main(void)
                         &ch,
                         1
                     ) == -1) {
+
                     running = 0;
                     break;
                 }
@@ -233,11 +220,16 @@ int main(void)
                     buffer,
                     n
                 ) == -1) {
+
                 running = 0;
             }
         }
     }
 
+    /*
+     * Restore the user's terminal BEFORE
+     * cleaning up the child shells.
+     */
     terminal_restore();
 
     multiplexer_cleanup(&mux);
