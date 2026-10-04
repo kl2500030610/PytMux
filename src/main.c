@@ -1,5 +1,6 @@
 #include "multiplexer.h"
 #include "terminal.h"
+#include "commands.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -67,43 +68,72 @@ int main(void)
                 break;
 
             /*
-             * W3 session switching:
+             * Ctrl-B is the command prefix.
              *
-             * Ctrl-B followed by a number will
-             * switch to that session.
+             * Ctrl-B followed by:
+             *
+             * c -> create session
+             * l -> list sessions
+             * q -> quit
+             * 0-9 -> switch session
              */
 
-            if (n == 2 &&
-                buffer[0] == 2 &&
-                buffer[1] >= '0' &&
-                buffer[1] <= '9') {
+            if (n == 2 && buffer[0] == 2) {
 
-                int session_id = buffer[1] - '0';
+                char command = buffer[1];
 
-                if (multiplexer_switch_session(
-                        &mux,
-                        session_id
-                    ) == 0) {
+                if (command >= '0' &&
+                    command <= '9') {
 
-                    char message[128];
+                    int session_id =
+                        command - '0';
 
-                    int len = snprintf(
-                        message,
-                        sizeof(message),
-                        "\r\n[Switched to session %d]\r\n",
-                        session_id
-                    );
+                    if (multiplexer_switch_session(
+                            &mux,
+                            session_id
+                        ) == 0) {
 
-                    write(
-                        STDOUT_FILENO,
-                        message,
-                        len
-                    );
+                        char message[128];
+
+                        int len = snprintf(
+                            message,
+                            sizeof(message),
+                            "\r\n[Switched to session %d]\r\n",
+                            session_id
+                        );
+
+                        write(
+                            STDOUT_FILENO,
+                            message,
+                            len
+                        );
+                    } else {
+                        const char *message =
+                            "\r\n[Invalid session]\r\n";
+
+                        write(
+                            STDOUT_FILENO,
+                            message,
+                            21
+                        );
+                    }
+
+                    continue;
                 }
 
-                continue;
+                int result =
+                    handle_command(&mux, command);
+
+                if (result == -1)
+                    break;
+
+                if (result == 1)
+                    continue;
             }
 
+            /*
+             * Normal keyboard input.
+             */
             if (write(
                     active->master_fd,
                     buffer,

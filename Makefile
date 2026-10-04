@@ -7,7 +7,8 @@ SRC = src/main.c \
       src/pty.c \
       src/terminal.c \
       src/session.c \
-      src/multiplexer.c
+      src/multiplexer.c \
+      src/commands.c
 
 OBJ = $(SRC:.c=.o)
 
