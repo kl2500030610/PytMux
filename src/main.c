@@ -26,10 +26,7 @@ static void update_terminal_size(Session *session)
     if (session == NULL)
         return;
 
-    if (terminal_get_size(
-            &rows,
-            &cols
-        ) == -1)
+    if (terminal_get_size(&rows, &cols) == -1)
         return;
 
     pty_set_size(
@@ -50,10 +47,7 @@ int main(void)
     if (terminal_raw_mode() == -1)
         return EXIT_FAILURE;
 
-    signal(
-        SIGWINCH,
-        handle_sigwinch
-    );
+    signal(SIGWINCH, handle_sigwinch);
 
     if (multiplexer_create_session(
             &mux,
@@ -71,12 +65,6 @@ int main(void)
     while (running) {
         fd_set read_fds;
         int max_fd = STDIN_FILENO;
-
-        Session *active =
-            multiplexer_get_active(&mux);
-
-        if (active == NULL)
-            break;
 
         /*
          * Handle terminal resize.
@@ -99,7 +87,7 @@ int main(void)
         FD_ZERO(&read_fds);
 
         /*
-         * Always monitor keyboard input.
+         * Keyboard.
          */
         FD_SET(
             STDIN_FILENO,
@@ -107,7 +95,7 @@ int main(void)
         );
 
         /*
-         * Monitor every running session.
+         * All running PTYs.
          */
         for (int i = 0;
              i < mux.session_count;
@@ -128,9 +116,6 @@ int main(void)
                 max_fd = session->master_fd;
         }
 
-        /*
-         * Wait for keyboard or any PTY.
-         */
         if (select(
                 max_fd + 1,
                 &read_fds,
@@ -172,7 +157,7 @@ int main(void)
                 char ch = buffer[i];
 
                 /*
-                 * Ctrl-B starts command mode.
+                 * Ctrl-B.
                  */
                 if (!command_mode &&
                     ch == 2) {
@@ -201,23 +186,30 @@ int main(void)
                     command_mode = 0;
 
                     /*
-                     * Ctrl-B Ctrl-B:
-                     * send literal Ctrl-B.
+                     * Literal Ctrl-B.
                      */
                     if (command.type ==
                         COMMAND_LITERAL_PREFIX) {
 
-                        char prefix = 2;
+                        Session *active =
+                            multiplexer_get_active(&mux);
 
-                        write(
-                            active->master_fd,
-                            &prefix,
-                            1
-                        );
+                        if (active != NULL) {
+                            char prefix = 2;
+
+                            write(
+                                active->master_fd,
+                                &prefix,
+                                1
+                            );
+                        }
 
                         continue;
                     }
 
+                    /*
+                     * Execute command.
+                     */
                     int result =
                         execute_command(
                             &mux,
@@ -230,24 +222,26 @@ int main(void)
                     }
 
                     /*
-                     * Active session may have changed.
+                     * Refresh active session
+                     * after a possible switch.
                      */
-                    active =
-                        multiplexer_get_active(
-                            &mux
-                        );
+                    Session *active =
+                        multiplexer_get_active(&mux);
 
-                    update_terminal_size(
-                        active
-                    );
+                    update_terminal_size(active);
 
                     continue;
                 }
 
                 /*
-                 * Normal keyboard input ->
-                 * active session.
+                 * Normal keyboard input.
                  */
+                Session *active =
+                    multiplexer_get_active(&mux);
+
+                if (active == NULL)
+                    continue;
+
                 if (write(
                         active->master_fd,
                         &ch,
@@ -261,7 +255,7 @@ int main(void)
         }
 
         /*
-         * Read output from ALL sessions.
+         * Read output from every session.
          */
         for (int i = 0;
              i < mux.session_count;
@@ -287,9 +281,6 @@ int main(void)
                 sizeof(buffer)
             );
 
-            /*
-             * Shell exited.
-             */
             if (n <= 0) {
                 session->state =
                     SESSION_DEAD;
@@ -298,7 +289,7 @@ int main(void)
             }
 
             /*
-             * Always save the output.
+             * Always save output.
              */
             session_buffer_write(
                 session,
@@ -307,16 +298,14 @@ int main(void)
             );
 
             /*
-             * Only display output from
-             * the active session.
+             * IMPORTANT:
+             *
+             * Check the CURRENT active session,
+             * not a previously stored pointer.
              */
             if (session->id ==
                 mux.active_session) {
 
-                /*
-                 * It is already being shown,
-                 * so there is no unread output.
-                 */
                 session->has_unread_output = 0;
 
                 if (write(
