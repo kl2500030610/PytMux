@@ -25,12 +25,16 @@ void multiplexer_init(
     mux->session_count = 0;
     mux->active_session = -1;
 
-    for (int i = 0; i < MAX_SESSIONS; i++)
+    for (int i = 0;
+         i < MAX_SESSIONS;
+         i++) {
+
         session_init(
             &mux->sessions[i],
             i,
             NULL
         );
+    }
 }
 
 int multiplexer_create_session(
@@ -41,10 +45,12 @@ int multiplexer_create_session(
     if (mux == NULL)
         return -1;
 
-    if (mux->session_count >= MAX_SESSIONS)
+    if (mux->session_count >=
+        MAX_SESSIONS)
         return -1;
 
-    int id = mux->session_count;
+    int id =
+        mux->session_count;
 
     Session *session =
         &mux->sessions[id];
@@ -83,24 +89,18 @@ int multiplexer_switch_session(
         return -1;
 
     if (session_id < 0 ||
-        session_id >= mux->session_count)
+        session_id >=
+            mux->session_count)
         return -1;
 
-    if (!session_is_alive(
-            &mux->sessions[session_id]
-        ))
+    Session *session =
+        &mux->sessions[session_id];
+
+    if (!session_is_alive(session))
         return -1;
 
     mux->active_session =
         session_id;
-
-    /*
-     * We are now displaying this
-     * session, so its unread flag
-     * can be cleared.
-     */
-    mux->sessions[session_id]
-        .has_unread_output = 0;
 
     return 0;
 }
@@ -112,7 +112,9 @@ void multiplexer_list_sessions(
     if (mux == NULL)
         return;
 
-    printf("\nSessions:\n");
+    printf(
+        "\r\nSessions:\r\n"
+    );
 
     for (int i = 0;
          i < mux->session_count;
@@ -122,9 +124,10 @@ void multiplexer_list_sessions(
             &mux->sessions[i];
 
         printf(
-            "  [%d] %-16s %s%s%s\n",
+            "  [%d] %-16s %s%s%s\r\n",
             session->id,
             session->name,
+
             session_is_alive(session)
                 ? "RUNNING"
                 : "DEAD",
@@ -140,7 +143,9 @@ void multiplexer_list_sessions(
         );
     }
 
-    printf("\n");
+    printf(
+        "\r\n"
+    );
 }
 
 Session *multiplexer_get_active(
@@ -194,7 +199,9 @@ void multiplexer_cleanup(
             );
         }
 
-        session_reset(session);
+        session_reset(
+            session
+        );
     }
 
     mux->session_count = 0;
