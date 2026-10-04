@@ -6,12 +6,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
-#include <signal.h>
 #include <sys/ioctl.h>
-#include <sys/wait.h>
-#include <termios.h>
 
-int create_pty_shell(void)
+int create_pty_shell(pid_t *child_pid)
 {
     int master_fd;
     pid_t pid;
@@ -75,18 +72,31 @@ int create_pty_shell(void)
             exit(EXIT_FAILURE);
         }
 
-        dup2(slave_fd, STDIN_FILENO);
-        dup2(slave_fd, STDOUT_FILENO);
-        dup2(slave_fd, STDERR_FILENO);
+        if (dup2(slave_fd, STDIN_FILENO) == -1 ||
+            dup2(slave_fd, STDOUT_FILENO) == -1 ||
+            dup2(slave_fd, STDERR_FILENO) == -1) {
+            perror("dup2");
+            close(slave_fd);
+            exit(EXIT_FAILURE);
+        }
 
         if (slave_fd > STDERR_FILENO)
             close(slave_fd);
 
-        execlp("/bin/bash", "bash", "--noprofile", "--norc", NULL);
+        execlp(
+            "/bin/bash",
+            "bash",
+            "--noprofile",
+            "--norc",
+            NULL
+        );
 
         perror("exec");
         exit(EXIT_FAILURE);
     }
+
+    if (child_pid != NULL)
+        *child_pid = pid;
 
     return master_fd;
 }

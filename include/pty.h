@@ -1,6 +1,8 @@
 #ifndef PTY_H
 #define PTY_H
 
-int create_pty_shell(void);
+#include <sys/types.h>
+
+int create_pty_shell(pid_t *child_pid);
 
 #endif

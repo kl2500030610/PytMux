@@ -1,5 +1,6 @@
 #include "pty.h"
 #include "terminal.h"
+#include "session.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,27 +11,38 @@
 
 int main(void)
 {
-    int master_fd;
+    Session session;
+
+    session_init(&session, 0, "bash");
 
     if (terminal_raw_mode() == -1)
         return EXIT_FAILURE;
 
-    master_fd = create_pty_shell();
+    session.master_fd = create_pty_shell(&session.pid);
 
-    if (master_fd == -1) {
+    if (session.master_fd == -1) {
         terminal_restore();
         return EXIT_FAILURE;
     }
 
-    while (1) {
+    session.state = SESSION_RUNNING;
+
+    while (session_is_alive(&session)) {
         fd_set read_fds;
 
         FD_ZERO(&read_fds);
 
         FD_SET(STDIN_FILENO, &read_fds);
-        FD_SET(master_fd, &read_fds);
+        FD_SET(session.master_fd, &read_fds);
 
-        if (select(master_fd + 1, &read_fds, NULL, NULL, NULL) == -1) {
+        if (select(
+                session.master_fd + 1,
+                &read_fds,
+                NULL,
+                NULL,
+                NULL
+            ) == -1) {
+
             if (errno == EINTR)
                 continue;
 
@@ -51,45 +63,58 @@ int main(void)
             if (n <= 0)
                 break;
 
-            ssize_t written = write(
-                master_fd,
-                buffer,
-                n
-            );
-
-            if (written == -1)
+            if (write(
+                    session.master_fd,
+                    buffer,
+                    n
+                ) == -1) {
                 break;
+            }
         }
 
         /* PTY → Terminal */
-        if (FD_ISSET(master_fd, &read_fds)) {
+        if (FD_ISSET(session.master_fd, &read_fds)) {
             char buffer[4096];
 
             ssize_t n = read(
-                master_fd,
+                session.master_fd,
                 buffer,
                 sizeof(buffer)
             );
 
-            if (n <= 0)
+            if (n <= 0) {
+                session.state = SESSION_DEAD;
                 break;
+            }
 
-            ssize_t written = write(
-                STDOUT_FILENO,
+            /* Store output in session buffer */
+            session_buffer_write(
+                &session,
                 buffer,
                 n
             );
 
-            if (written == -1)
+            /* Display output */
+            if (write(
+                    STDOUT_FILENO,
+                    buffer,
+                    n
+                ) == -1) {
                 break;
+            }
         }
     }
 
     terminal_restore();
 
-    close(master_fd);
+    if (session.master_fd != -1) {
+        close(session.master_fd);
+        session.master_fd = -1;
+    }
 
-    wait(NULL);
+    waitpid(session.pid, NULL, 0);
+
+    session.state = SESSION_DEAD;
 
     return EXIT_SUCCESS;
 }
