@@ -3,17 +3,29 @@
 #include <string.h>
 #include <unistd.h>
 
-void session_init(Session *session, int id, const char *name)
+void session_init(
+    Session *session,
+    int id,
+    const char *name
+)
 {
     if (session == NULL)
         return;
 
-    memset(session, 0, sizeof(Session));
+    memset(
+        session,
+        0,
+        sizeof(Session)
+    );
 
     session->id = id;
     session->pid = -1;
     session->master_fd = -1;
     session->state = SESSION_DEAD;
+
+    session->buffer_start = 0;
+    session->buffer_end = 0;
+    session->has_unread_output = 0;
 
     if (name != NULL) {
         strncpy(
@@ -22,11 +34,15 @@ void session_init(Session *session, int id, const char *name)
             SESSION_NAME_SIZE - 1
         );
 
-        session->name[SESSION_NAME_SIZE - 1] = '\0';
+        session->name[
+            SESSION_NAME_SIZE - 1
+        ] = '\0';
     }
 }
 
-void session_reset(Session *session)
+void session_reset(
+    Session *session
+)
 {
     if (session == NULL)
         return;
@@ -41,9 +57,12 @@ void session_reset(Session *session)
 
     session->buffer_start = 0;
     session->buffer_end = 0;
+    session->has_unread_output = 0;
 }
 
-int session_is_alive(const Session *session)
+int session_is_alive(
+    const Session *session
+)
 {
     if (session == NULL)
         return 0;
@@ -57,20 +76,29 @@ int session_buffer_write(
     size_t size
 )
 {
-    if (session == NULL || data == NULL)
+    if (session == NULL ||
+        data == NULL)
         return -1;
 
     for (size_t i = 0; i < size; i++) {
-        session->output_buffer[session->buffer_end] = data[i];
+        session->output_buffer[
+            session->buffer_end
+        ] = data[i];
 
         session->buffer_end =
-            (session->buffer_end + 1) % OUTPUT_BUFFER_SIZE;
+            (session->buffer_end + 1)
+            % OUTPUT_BUFFER_SIZE;
 
-        if (session->buffer_end == session->buffer_start) {
+        if (session->buffer_end ==
+            session->buffer_start) {
+
             session->buffer_start =
-                (session->buffer_start + 1) % OUTPUT_BUFFER_SIZE;
+                (session->buffer_start + 1)
+                % OUTPUT_BUFFER_SIZE;
         }
     }
+
+    session->has_unread_output = 1;
 
     return 0;
 }
@@ -83,18 +111,30 @@ size_t session_buffer_read(
 {
     size_t count = 0;
 
-    if (session == NULL || data == NULL || size == 0)
+    if (session == NULL ||
+        data == NULL ||
+        size == 0)
         return 0;
 
     while (
-        session->buffer_start != session->buffer_end &&
+        session->buffer_start !=
+            session->buffer_end &&
         count < size
     ) {
         data[count++] =
-            session->output_buffer[session->buffer_start];
+            session->output_buffer[
+                session->buffer_start
+            ];
 
         session->buffer_start =
-            (session->buffer_start + 1) % OUTPUT_BUFFER_SIZE;
+            (session->buffer_start + 1)
+            % OUTPUT_BUFFER_SIZE;
+    }
+
+    if (session->buffer_start ==
+        session->buffer_end) {
+
+        session->has_unread_output = 0;
     }
 
     return count;

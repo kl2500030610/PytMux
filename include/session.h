@@ -25,13 +25,24 @@ typedef struct {
     char output_buffer[OUTPUT_BUFFER_SIZE];
     size_t buffer_start;
     size_t buffer_end;
+
+    int has_unread_output;
+
 } Session;
 
-void session_init(Session *session, int id, const char *name);
+void session_init(
+    Session *session,
+    int id,
+    const char *name
+);
 
-void session_reset(Session *session);
+void session_reset(
+    Session *session
+);
 
-int session_is_alive(const Session *session);
+int session_is_alive(
+    const Session *session
+);
 
 int session_buffer_write(
     Session *session,
