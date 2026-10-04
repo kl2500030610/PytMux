@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <termios.h>
 #include <unistd.h>
+#include <sys/ioctl.h>
 
 static struct termios original_termios;
 static int terminal_configured = 0;
@@ -11,7 +12,11 @@ static int terminal_configured = 0;
 void terminal_restore(void)
 {
     if (terminal_configured)
-        tcsetattr(STDIN_FILENO, TCSAFLUSH, &original_termios);
+        tcsetattr(
+            STDIN_FILENO,
+            TCSAFLUSH,
+            &original_termios
+        );
 }
 
 int terminal_raw_mode(void)
@@ -19,25 +24,48 @@ int terminal_raw_mode(void)
     struct termios raw;
 
     if (!isatty(STDIN_FILENO)) {
-        fprintf(stderr, "stdin is not a terminal\n");
+        fprintf(
+            stderr,
+            "stdin is not a terminal\n"
+        );
+
         return -1;
     }
 
-    if (tcgetattr(STDIN_FILENO, &original_termios) == -1) {
+    if (tcgetattr(
+            STDIN_FILENO,
+            &original_termios
+        ) == -1) {
+
         perror("tcgetattr");
         return -1;
     }
 
     raw = original_termios;
 
-    raw.c_lflag &= ~(ECHO | ICANON | ISIG | IEXTEN);
-    raw.c_iflag &= ~(IXON | ICRNL);
-    raw.c_oflag &= ~(OPOST);
+    raw.c_lflag &= ~(
+        ECHO |
+        ICANON |
+        ISIG |
+        IEXTEN
+    );
+
+    raw.c_iflag &= ~(
+        IXON |
+        ICRNL
+    );
+
+    raw.c_oflag &= ~OPOST;
 
     raw.c_cc[VMIN] = 1;
     raw.c_cc[VTIME] = 0;
 
-    if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) {
+    if (tcsetattr(
+            STDIN_FILENO,
+            TCSAFLUSH,
+            &raw
+        ) == -1) {
+
         perror("tcsetattr");
         return -1;
     }
@@ -45,6 +73,32 @@ int terminal_raw_mode(void)
     terminal_configured = 1;
 
     atexit(terminal_restore);
+
+    return 0;
+}
+
+int terminal_get_size(
+    int *rows,
+    int *cols
+)
+{
+    struct winsize size;
+
+    if (rows == NULL || cols == NULL)
+        return -1;
+
+    if (ioctl(
+            STDIN_FILENO,
+            TIOCGWINSZ,
+            &size
+        ) == -1) {
+
+        perror("TIOCGWINSZ");
+        return -1;
+    }
+
+    *rows = size.ws_row;
+    *cols = size.ws_col;
 
     return 0;
 }

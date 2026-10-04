@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <termios.h>
 
 int create_pty_shell(pid_t *child_pid)
 {
@@ -14,7 +15,9 @@ int create_pty_shell(pid_t *child_pid)
     pid_t pid;
     char *slave_name;
 
-    master_fd = posix_openpt(O_RDWR | O_NOCTTY);
+    master_fd = posix_openpt(
+        O_RDWR | O_NOCTTY
+    );
 
     if (master_fd == -1) {
         perror("posix_openpt");
@@ -59,22 +62,40 @@ int create_pty_shell(pid_t *child_pid)
             exit(EXIT_FAILURE);
         }
 
-        slave_fd = open(slave_name, O_RDWR);
+        slave_fd = open(
+            slave_name,
+            O_RDWR
+        );
 
         if (slave_fd == -1) {
             perror("open slave PTY");
             exit(EXIT_FAILURE);
         }
 
-        if (ioctl(slave_fd, TIOCSCTTY, 0) == -1) {
+        if (ioctl(
+                slave_fd,
+                TIOCSCTTY,
+                0
+            ) == -1) {
+
             perror("TIOCSCTTY");
             close(slave_fd);
             exit(EXIT_FAILURE);
         }
 
-        if (dup2(slave_fd, STDIN_FILENO) == -1 ||
-            dup2(slave_fd, STDOUT_FILENO) == -1 ||
-            dup2(slave_fd, STDERR_FILENO) == -1) {
+        if (dup2(
+                slave_fd,
+                STDIN_FILENO
+            ) == -1 ||
+            dup2(
+                slave_fd,
+                STDOUT_FILENO
+            ) == -1 ||
+            dup2(
+                slave_fd,
+                STDERR_FILENO
+            ) == -1) {
+
             perror("dup2");
             close(slave_fd);
             exit(EXIT_FAILURE);
@@ -99,4 +120,30 @@ int create_pty_shell(pid_t *child_pid)
         *child_pid = pid;
 
     return master_fd;
+}
+
+int pty_set_size(
+    int master_fd,
+    int rows,
+    int cols
+)
+{
+    struct winsize size;
+
+    size.ws_row = rows;
+    size.ws_col = cols;
+    size.ws_xpixel = 0;
+    size.ws_ypixel = 0;
+
+    if (ioctl(
+            master_fd,
+            TIOCSWINSZ,
+            &size
+        ) == -1) {
+
+        perror("TIOCSWINSZ");
+        return -1;
+    }
+
+    return 0;
 }

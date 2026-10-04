@@ -1,12 +1,40 @@
 #include "multiplexer.h"
 #include "terminal.h"
 #include "commands.h"
+#include "pty.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/select.h>
+#include <signal.h>
 #include <errno.h>
+
+static volatile sig_atomic_t resize_pending = 0;
+
+static void handle_sigwinch(int signal)
+{
+    (void)signal;
+    resize_pending = 1;
+}
+
+static void update_terminal_size(Session *session)
+{
+    int rows;
+    int cols;
+
+    if (session == NULL)
+        return;
+
+    if (terminal_get_size(&rows, &cols) == -1)
+        return;
+
+    pty_set_size(
+        session->master_fd,
+        rows,
+        cols
+    );
+}
 
 int main(void)
 {
@@ -19,10 +47,26 @@ int main(void)
     if (terminal_raw_mode() == -1)
         return EXIT_FAILURE;
 
-    if (multiplexer_create_session(&mux, "bash-0") == -1) {
+    signal(
+        SIGWINCH,
+        handle_sigwinch
+    );
+
+    if (multiplexer_create_session(
+            &mux,
+            "bash-0"
+        ) == -1) {
+
         terminal_restore();
         return EXIT_FAILURE;
     }
+
+    /*
+     * Set the initial PTY size.
+     */
+    update_terminal_size(
+        multiplexer_get_active(&mux)
+    );
 
     while (running) {
         Session *active;
@@ -33,10 +77,26 @@ int main(void)
         if (active == NULL)
             break;
 
+        /*
+         * Handle terminal resize.
+         */
+        if (resize_pending) {
+            resize_pending = 0;
+
+            update_terminal_size(active);
+        }
+
         FD_ZERO(&read_fds);
 
-        FD_SET(STDIN_FILENO, &read_fds);
-        FD_SET(active->master_fd, &read_fds);
+        FD_SET(
+            STDIN_FILENO,
+            &read_fds
+        );
+
+        FD_SET(
+            active->master_fd,
+            &read_fds
+        );
 
         if (select(
                 active->master_fd + 1,
@@ -53,7 +113,14 @@ int main(void)
             break;
         }
 
-        if (FD_ISSET(STDIN_FILENO, &read_fds)) {
+        /*
+         * Keyboard input
+         */
+        if (FD_ISSET(
+                STDIN_FILENO,
+                &read_fds
+            )) {
+
             char buffer[4096];
 
             ssize_t n = read(
@@ -69,7 +136,7 @@ int main(void)
                 char ch = buffer[i];
 
                 /*
-                 * Ctrl+B starts command mode.
+                 * Ctrl-B starts command mode.
                  */
                 if (!command_mode && ch == 2) {
                     command_mode = 1;
@@ -87,7 +154,7 @@ int main(void)
                 }
 
                 /*
-                 * Handle command after Ctrl+B.
+                 * Handle command after Ctrl-B.
                  */
                 if (command_mode) {
                     command_mode = 0;
@@ -104,12 +171,22 @@ int main(void)
                      * Switch session.
                      */
                     if (ch >= '0' && ch <= '9') {
-                        int session_id = ch - '0';
+                        int session_id =
+                            ch - '0';
 
                         if (multiplexer_switch_session(
                                 &mux,
                                 session_id
                             ) == 0) {
+
+                            active =
+                                multiplexer_get_active(
+                                    &mux
+                                );
+
+                            update_terminal_size(
+                                active
+                            );
 
                             char message[128];
 
@@ -143,7 +220,24 @@ int main(void)
                      * Create session.
                      */
                     if (ch == 'c') {
-                        handle_command(&mux, 'c');
+                        handle_command(
+                            &mux,
+                            'c'
+                        );
+
+                        /*
+                         * Apply terminal size to the
+                         * newly active session.
+                         */
+                        active =
+                            multiplexer_get_active(
+                                &mux
+                            );
+
+                        update_terminal_size(
+                            active
+                        );
+
                         continue;
                     }
 
@@ -151,7 +245,11 @@ int main(void)
                      * List sessions.
                      */
                     if (ch == 'l') {
-                        handle_command(&mux, 'l');
+                        handle_command(
+                            &mux,
+                            'l'
+                        );
+
                         continue;
                     }
 
@@ -205,7 +303,9 @@ int main(void)
             );
 
             if (n <= 0) {
-                active->state = SESSION_DEAD;
+                active->state =
+                    SESSION_DEAD;
+
                 continue;
             }
 
@@ -226,10 +326,6 @@ int main(void)
         }
     }
 
-    /*
-     * Restore the user's terminal BEFORE
-     * cleaning up the child shells.
-     */
     terminal_restore();
 
     multiplexer_cleanup(&mux);
