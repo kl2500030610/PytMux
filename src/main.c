@@ -36,6 +36,32 @@ static void update_terminal_size(Session *session)
     );
 }
 
+static void display_session_buffer(Session *session)
+{
+    char buffer[4096];
+    size_t n;
+
+    if (session == NULL)
+        return;
+
+    while ((n = session_buffer_read(
+                session,
+                buffer,
+                sizeof(buffer)
+            )) > 0) {
+
+        if (write(
+                STDOUT_FILENO,
+                buffer,
+                n
+            ) == -1) {
+            return;
+        }
+    }
+
+    session->has_unread_output = 0;
+}
+
 int main(void)
 {
     Multiplexer mux;
@@ -47,7 +73,10 @@ int main(void)
     if (terminal_raw_mode() == -1)
         return EXIT_FAILURE;
 
-    signal(SIGWINCH, handle_sigwinch);
+    signal(
+        SIGWINCH,
+        handle_sigwinch
+    );
 
     if (multiplexer_create_session(
             &mux,
@@ -65,10 +94,8 @@ int main(void)
     while (running) {
         fd_set read_fds;
         int max_fd = STDIN_FILENO;
+        int session_switched = 0;
 
-        /*
-         * Handle terminal resize.
-         */
         if (resize_pending) {
             resize_pending = 0;
 
@@ -86,17 +113,11 @@ int main(void)
 
         FD_ZERO(&read_fds);
 
-        /*
-         * Keyboard.
-         */
         FD_SET(
             STDIN_FILENO,
             &read_fds
         );
 
-        /*
-         * All running PTYs.
-         */
         for (int i = 0;
              i < mux.session_count;
              i++) {
@@ -132,7 +153,7 @@ int main(void)
         }
 
         /*
-         * Keyboard input.
+         * Keyboard input
          */
         if (FD_ISSET(
                 STDIN_FILENO,
@@ -157,7 +178,7 @@ int main(void)
                 char ch = buffer[i];
 
                 /*
-                 * Ctrl-B.
+                 * Ctrl-B starts command mode.
                  */
                 if (!command_mode &&
                     ch == 2) {
@@ -192,7 +213,9 @@ int main(void)
                         COMMAND_LITERAL_PREFIX) {
 
                         Session *active =
-                            multiplexer_get_active(&mux);
+                            multiplexer_get_active(
+                                &mux
+                            );
 
                         if (active != NULL) {
                             char prefix = 2;
@@ -208,8 +231,12 @@ int main(void)
                     }
 
                     /*
-                     * Execute command.
+                     * Remember the session before
+                     * executing the command.
                      */
+                    int old_session =
+                        mux.active_session;
+
                     int result =
                         execute_command(
                             &mux,
@@ -222,13 +249,31 @@ int main(void)
                     }
 
                     /*
-                     * Refresh active session
-                     * after a possible switch.
+                     * Detect session switching.
                      */
-                    Session *active =
-                        multiplexer_get_active(&mux);
+                    if (mux.active_session !=
+                        old_session) {
 
-                    update_terminal_size(active);
+                        session_switched = 1;
+
+                        Session *active =
+                            multiplexer_get_active(
+                                &mux
+                            );
+
+                        update_terminal_size(
+                            active
+                        );
+
+                        /*
+                         * Display output that was
+                         * buffered while this session
+                         * was inactive.
+                         */
+                        display_session_buffer(
+                            active
+                        );
+                    }
 
                     continue;
                 }
@@ -237,7 +282,9 @@ int main(void)
                  * Normal keyboard input.
                  */
                 Session *active =
-                    multiplexer_get_active(&mux);
+                    multiplexer_get_active(
+                        &mux
+                    );
 
                 if (active == NULL)
                     continue;
@@ -255,7 +302,11 @@ int main(void)
         }
 
         /*
-         * Read output from every session.
+         * If a session switch happened during
+         * this select() iteration, do not display
+         * stale output from other sessions.
+         *
+         * We still read and buffer it below.
          */
         for (int i = 0;
              i < mux.session_count;
@@ -289,7 +340,7 @@ int main(void)
             }
 
             /*
-             * Always save output.
+             * Always store output.
              */
             session_buffer_write(
                 session,
@@ -298,13 +349,14 @@ int main(void)
             );
 
             /*
-             * IMPORTANT:
-             *
-             * Check the CURRENT active session,
-             * not a previously stored pointer.
+             * Display only if this session is
+             * STILL the active session and no
+             * session switch occurred during
+             * this iteration.
              */
-            if (session->id ==
-                mux.active_session) {
+            if (!session_switched &&
+                session->id ==
+                    mux.active_session) {
 
                 session->has_unread_output = 0;
 
