@@ -23,6 +23,7 @@ typedef struct {
     SessionState state;
 
     char output_buffer[OUTPUT_BUFFER_SIZE];
+
     size_t buffer_start;
     size_t buffer_end;
 
@@ -54,6 +55,10 @@ size_t session_buffer_read(
     Session *session,
     char *data,
     size_t size
+);
+
+size_t session_buffer_size(
+    const Session *session
 );
 
 #endif

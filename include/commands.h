@@ -9,7 +9,8 @@ typedef enum {
     COMMAND_LIST,
     COMMAND_QUIT,
     COMMAND_SWITCH,
-    COMMAND_LITERAL_PREFIX
+    COMMAND_LITERAL_PREFIX,
+    COMMAND_SCROLLBACK
 } CommandType;
 
 typedef struct {

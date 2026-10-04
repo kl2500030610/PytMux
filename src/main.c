@@ -36,7 +36,13 @@ static void update_terminal_size(Session *session)
     );
 }
 
-static void display_session_buffer(Session *session)
+/*
+ * Display buffered output when returning
+ * to a session.
+ */
+static void display_session_buffer(
+    Session *session
+)
 {
     char buffer[4096];
     size_t n;
@@ -55,6 +61,7 @@ static void display_session_buffer(Session *session)
                 buffer,
                 n
             ) == -1) {
+
             return;
         }
     }
@@ -62,9 +69,61 @@ static void display_session_buffer(Session *session)
     session->has_unread_output = 0;
 }
 
+/*
+ * Simple W7 scrollback mode.
+ *
+ * The current buffer is displayed from
+ * oldest to newest. Press q to leave.
+ */
+static void enter_scrollback(
+    Session *session
+)
+{
+    if (session == NULL)
+        return;
+
+    terminal_restore();
+
+    printf(
+        "\n[PtyMux] Scrollback mode - "
+        "press q to exit\n"
+    );
+
+    display_session_buffer(session);
+
+    printf(
+        "\n[PtyMux] End of scrollback\n"
+    );
+
+    fflush(stdout);
+
+    /*
+     * Wait for q.
+     */
+    char ch;
+
+    while (read(
+               STDIN_FILENO,
+               &ch,
+               1
+           ) == 1) {
+
+        if (ch == 'q' ||
+            ch == 'Q') {
+
+            break;
+        }
+    }
+
+    terminal_raw_mode();
+
+    update_terminal_size(session);
+}
+
 int main(void)
 {
     Multiplexer mux;
+
     int command_mode = 0;
     int running = 1;
 
@@ -92,11 +151,19 @@ int main(void)
     );
 
     while (running) {
+
         fd_set read_fds;
-        int max_fd = STDIN_FILENO;
+
+        int max_fd =
+            STDIN_FILENO;
+
         int session_switched = 0;
 
+        /*
+         * Handle terminal resize.
+         */
         if (resize_pending) {
+
             resize_pending = 0;
 
             for (int i = 0;
@@ -106,18 +173,30 @@ int main(void)
                 Session *session =
                     &mux.sessions[i];
 
-                if (session_is_alive(session))
-                    update_terminal_size(session);
+                if (session_is_alive(
+                        session
+                    )) {
+
+                    update_terminal_size(
+                        session
+                    );
+                }
             }
         }
 
         FD_ZERO(&read_fds);
 
+        /*
+         * Keyboard.
+         */
         FD_SET(
             STDIN_FILENO,
             &read_fds
         );
 
+        /*
+         * All session PTYs.
+         */
         for (int i = 0;
              i < mux.session_count;
              i++) {
@@ -125,18 +204,29 @@ int main(void)
             Session *session =
                 &mux.sessions[i];
 
-            if (!session_is_alive(session))
+            if (!session_is_alive(
+                    session
+                )) {
+
                 continue;
+            }
 
             FD_SET(
                 session->master_fd,
                 &read_fds
             );
 
-            if (session->master_fd > max_fd)
-                max_fd = session->master_fd;
+            if (session->master_fd >
+                max_fd) {
+
+                max_fd =
+                    session->master_fd;
+            }
         }
 
+        /*
+         * Wait for input/output.
+         */
         if (select(
                 max_fd + 1,
                 &read_fds,
@@ -153,7 +243,7 @@ int main(void)
         }
 
         /*
-         * Keyboard input
+         * Keyboard input.
          */
         if (FD_ISSET(
                 STDIN_FILENO,
@@ -162,11 +252,12 @@ int main(void)
 
             char buffer[4096];
 
-            ssize_t n = read(
-                STDIN_FILENO,
-                buffer,
-                sizeof(buffer)
-            );
+            ssize_t n =
+                read(
+                    STDIN_FILENO,
+                    buffer,
+                    sizeof(buffer)
+                );
 
             if (n <= 0)
                 break;
@@ -175,10 +266,11 @@ int main(void)
                  i < n;
                  i++) {
 
-                char ch = buffer[i];
+                char ch =
+                    buffer[i];
 
                 /*
-                 * Ctrl-B starts command mode.
+                 * Ctrl-B.
                  */
                 if (!command_mode &&
                     ch == 2) {
@@ -201,6 +293,7 @@ int main(void)
                  * Command mode.
                  */
                 if (command_mode) {
+
                     Command command =
                         parse_command(ch);
 
@@ -218,6 +311,7 @@ int main(void)
                             );
 
                         if (active != NULL) {
+
                             char prefix = 2;
 
                             write(
@@ -231,12 +325,32 @@ int main(void)
                     }
 
                     /*
-                     * Remember the session before
-                     * executing the command.
+                     * Save current session.
                      */
                     int old_session =
                         mux.active_session;
 
+                    /*
+                     * Scrollback.
+                     */
+                    if (command.type ==
+                        COMMAND_SCROLLBACK) {
+
+                        Session *active =
+                            multiplexer_get_active(
+                                &mux
+                            );
+
+                        enter_scrollback(
+                            active
+                        );
+
+                        continue;
+                    }
+
+                    /*
+                     * Execute normal command.
+                     */
                     int result =
                         execute_command(
                             &mux,
@@ -244,12 +358,13 @@ int main(void)
                         );
 
                     if (result == -1) {
+
                         running = 0;
                         break;
                     }
 
                     /*
-                     * Detect session switching.
+                     * Detect session switch.
                      */
                     if (mux.active_session !=
                         old_session) {
@@ -266,9 +381,9 @@ int main(void)
                         );
 
                         /*
-                         * Display output that was
-                         * buffered while this session
-                         * was inactive.
+                         * Display buffered output
+                         * from the newly active
+                         * session.
                          */
                         display_session_buffer(
                             active
@@ -302,11 +417,7 @@ int main(void)
         }
 
         /*
-         * If a session switch happened during
-         * this select() iteration, do not display
-         * stale output from other sessions.
-         *
-         * We still read and buffer it below.
+         * Read output from all PTYs.
          */
         for (int i = 0;
              i < mux.session_count;
@@ -315,24 +426,32 @@ int main(void)
             Session *session =
                 &mux.sessions[i];
 
-            if (!session_is_alive(session))
+            if (!session_is_alive(
+                    session
+                )) {
+
                 continue;
+            }
 
             if (!FD_ISSET(
                     session->master_fd,
                     &read_fds
-                ))
+                )) {
+
                 continue;
+            }
 
             char buffer[4096];
 
-            ssize_t n = read(
-                session->master_fd,
-                buffer,
-                sizeof(buffer)
-            );
+            ssize_t n =
+                read(
+                    session->master_fd,
+                    buffer,
+                    sizeof(buffer)
+                );
 
             if (n <= 0) {
+
                 session->state =
                     SESSION_DEAD;
 
@@ -340,7 +459,7 @@ int main(void)
             }
 
             /*
-             * Always store output.
+             * Always buffer output.
              */
             session_buffer_write(
                 session,
@@ -349,16 +468,15 @@ int main(void)
             );
 
             /*
-             * Display only if this session is
-             * STILL the active session and no
-             * session switch occurred during
-             * this iteration.
+             * Only display output from
+             * the active session.
              */
             if (!session_switched &&
                 session->id ==
                     mux.active_session) {
 
-                session->has_unread_output = 0;
+                session->has_unread_output =
+                    0;
 
                 if (write(
                         STDOUT_FILENO,

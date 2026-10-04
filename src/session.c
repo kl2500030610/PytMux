@@ -81,6 +81,7 @@ int session_buffer_write(
         return -1;
 
     for (size_t i = 0; i < size; i++) {
+
         session->output_buffer[
             session->buffer_end
         ] = data[i];
@@ -138,4 +139,23 @@ size_t session_buffer_read(
     }
 
     return count;
+}
+
+size_t session_buffer_size(
+    const Session *session
+)
+{
+    if (session == NULL)
+        return 0;
+
+    if (session->buffer_end >=
+        session->buffer_start) {
+
+        return session->buffer_end -
+               session->buffer_start;
+    }
+
+    return OUTPUT_BUFFER_SIZE -
+           session->buffer_start +
+           session->buffer_end;
 }
