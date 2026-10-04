@@ -26,7 +26,10 @@ static void update_terminal_size(Session *session)
     if (session == NULL)
         return;
 
-    if (terminal_get_size(&rows, &cols) == -1)
+    if (terminal_get_size(
+            &rows,
+            &cols
+        ) == -1)
         return;
 
     pty_set_size(
@@ -61,9 +64,6 @@ int main(void)
         return EXIT_FAILURE;
     }
 
-    /*
-     * Set the initial PTY size.
-     */
     update_terminal_size(
         multiplexer_get_active(&mux)
     );
@@ -77,9 +77,6 @@ int main(void)
         if (active == NULL)
             break;
 
-        /*
-         * Handle terminal resize.
-         */
         if (resize_pending) {
             resize_pending = 0;
 
@@ -114,7 +111,7 @@ int main(void)
         }
 
         /*
-         * Keyboard input
+         * Keyboard -> PtyMux / shell
          */
         if (FD_ISSET(
                 STDIN_FILENO,
@@ -136,7 +133,7 @@ int main(void)
                 char ch = buffer[i];
 
                 /*
-                 * Ctrl-B starts command mode.
+                 * Start command mode.
                  */
                 if (!command_mode && ch == 2) {
                     command_mode = 1;
@@ -154,124 +151,62 @@ int main(void)
                 }
 
                 /*
-                 * Handle command after Ctrl-B.
+                 * Command mode.
                  */
                 if (command_mode) {
+                    Command command =
+                        parse_command(ch);
+
                     command_mode = 0;
 
                     /*
-                     * Quit.
+                     * Ctrl+B Ctrl+B
+                     *
+                     * Send literal Ctrl+B
+                     * to the shell.
                      */
-                    if (ch == 'q') {
+                    if (command.type ==
+                        COMMAND_LITERAL_PREFIX) {
+
+                        char prefix = 2;
+
+                        write(
+                            active->master_fd,
+                            &prefix,
+                            1
+                        );
+
+                        continue;
+                    }
+
+                    int result =
+                        execute_command(
+                            &mux,
+                            command
+                        );
+
+                    if (result == -1) {
                         running = 0;
                         break;
                     }
 
                     /*
-                     * Switch session.
+                     * Session may have changed.
                      */
-                    if (ch >= '0' && ch <= '9') {
-                        int session_id =
-                            ch - '0';
-
-                        if (multiplexer_switch_session(
-                                &mux,
-                                session_id
-                            ) == 0) {
-
-                            active =
-                                multiplexer_get_active(
-                                    &mux
-                                );
-
-                            update_terminal_size(
-                                active
-                            );
-
-                            char message[128];
-
-                            int len = snprintf(
-                                message,
-                                sizeof(message),
-                                "\r\033[2K[Switched to session %d]\r\n",
-                                session_id
-                            );
-
-                            write(
-                                STDOUT_FILENO,
-                                message,
-                                len
-                            );
-                        } else {
-                            const char *message =
-                                "\r\033[2K[Invalid session]\r\n";
-
-                            write(
-                                STDOUT_FILENO,
-                                message,
-                                24
-                            );
-                        }
-
-                        continue;
-                    }
-
-                    /*
-                     * Create session.
-                     */
-                    if (ch == 'c') {
-                        handle_command(
-                            &mux,
-                            'c'
+                    active =
+                        multiplexer_get_active(
+                            &mux
                         );
 
-                        /*
-                         * Apply terminal size to the
-                         * newly active session.
-                         */
-                        active =
-                            multiplexer_get_active(
-                                &mux
-                            );
-
-                        update_terminal_size(
-                            active
-                        );
-
-                        continue;
-                    }
-
-                    /*
-                     * List sessions.
-                     */
-                    if (ch == 'l') {
-                        handle_command(
-                            &mux,
-                            'l'
-                        );
-
-                        continue;
-                    }
-
-                    /*
-                     * Unknown command.
-                     */
-                    {
-                        const char *message =
-                            "\r\033[2K[Unknown command]\r\n";
-
-                        write(
-                            STDOUT_FILENO,
-                            message,
-                            23
-                        );
-                    }
+                    update_terminal_size(
+                        active
+                    );
 
                     continue;
                 }
 
                 /*
-                 * Normal keyboard input -> active PTY.
+                 * Normal keyboard input.
                  */
                 if (write(
                         active->master_fd,
@@ -286,7 +221,7 @@ int main(void)
         }
 
         /*
-         * Active PTY -> terminal.
+         * PTY -> terminal
          */
         if (running &&
             FD_ISSET(
