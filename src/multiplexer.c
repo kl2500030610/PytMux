@@ -1,11 +1,13 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include "multiplexer.h"
 #include "pty.h"
 
 #include <stdio.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#include <signal.h>
 
 void multiplexer_init(Multiplexer *mux)
 {
