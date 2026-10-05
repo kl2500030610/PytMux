@@ -62,6 +62,18 @@ int execute_command(
 
         case COMMAND_CREATE:
         {
+            if (mux->session_count >=
+                MAX_SESSIONS) {
+
+                printf(
+                    "\r\033[2K"
+                    "[PtyMux] Maximum sessions reached"
+                    "\r\n"
+                );
+
+                return 1;
+            }
+
             char name[64];
 
             snprintf(
@@ -77,11 +89,21 @@ int execute_command(
                     name
                 );
 
-            if (id == -1)
-                return 0;
+            if (id == -1) {
+
+                printf(
+                    "\r\033[2K"
+                    "[PtyMux] Failed to create session"
+                    "\r\n"
+                );
+
+                return 1;
+            }
 
             printf(
-                "\r\033[2K[Created session %d]\n",
+                "\r\033[2K"
+                "[Created session %d]"
+                "\r\n",
                 id
             );
 
@@ -104,14 +126,18 @@ int execute_command(
                 ) == 0) {
 
                 printf(
-                    "\r\033[2K[Switched to session %d]\n",
+                    "\r\033[2K"
+                    "[Switched to session %d]"
+                    "\r\n",
                     command.session_id
                 );
 
             } else {
 
                 printf(
-                    "\r\033[2K[Invalid session]\n"
+                    "\r\033[2K"
+                    "[Invalid session]"
+                    "\r\n"
                 );
             }
 
