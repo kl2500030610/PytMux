@@ -28,6 +28,8 @@ typedef struct {
     size_t buffer_end;
     size_t buffer_count;
 
+    size_t unread_count;
+
     int has_unread_output;
 
 } Session;
@@ -62,6 +64,16 @@ size_t session_buffer_peek(
     const Session *session,
     char *data,
     size_t size
+);
+
+size_t session_buffer_peek_unread(
+    const Session *session,
+    char *data,
+    size_t size
+);
+
+void session_mark_displayed(
+    Session *session
 );
 
 size_t session_buffer_size(

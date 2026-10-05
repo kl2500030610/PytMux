@@ -26,9 +26,11 @@ void session_init(
     session->buffer_start = 0;
     session->buffer_end = 0;
     session->buffer_count = 0;
+    session->unread_count = 0;
     session->has_unread_output = 0;
 
     if (name != NULL) {
+
         strncpy(
             session->name,
             name,
@@ -59,6 +61,7 @@ void session_reset(
     session->buffer_start = 0;
     session->buffer_end = 0;
     session->buffer_count = 0;
+    session->unread_count = 0;
     session->has_unread_output = 0;
 }
 
@@ -99,13 +102,29 @@ int session_buffer_write(
 
         } else {
 
+            /*
+             * The ring buffer is full.
+             * The oldest byte is being
+             * overwritten.
+             */
             session->buffer_start =
                 (session->buffer_start + 1)
                 % OUTPUT_BUFFER_SIZE;
         }
+
+        /*
+         * New output is unread until
+         * the multiplexer displays it.
+         */
+        if (session->unread_count <
+            OUTPUT_BUFFER_SIZE) {
+
+            session->unread_count++;
+        }
     }
 
-    session->has_unread_output = 1;
+    session->has_unread_output =
+        session->unread_count > 0;
 
     return 0;
 }
@@ -138,11 +157,13 @@ size_t session_buffer_read(
             % OUTPUT_BUFFER_SIZE;
 
         session->buffer_count--;
+
+        if (session->unread_count > 0)
+            session->unread_count--;
     }
 
-    if (session->buffer_count == 0) {
-        session->has_unread_output = 0;
-    }
+    session->has_unread_output =
+        session->unread_count > 0;
 
     return count;
 }
@@ -177,6 +198,67 @@ size_t session_buffer_peek(
     }
 
     return count;
+}
+
+size_t session_buffer_peek_unread(
+    const Session *session,
+    char *data,
+    size_t size
+)
+{
+    size_t count = 0;
+    size_t position;
+
+    if (session == NULL ||
+        data == NULL ||
+        size == 0)
+        return 0;
+
+    if (session->unread_count == 0)
+        return 0;
+
+    /*
+     * Unread data is always the newest
+     * unread portion of the ring buffer.
+     */
+    if (session->unread_count >
+        session->buffer_count) {
+
+        return 0;
+    }
+
+    position =
+        (
+            session->buffer_end
+            + OUTPUT_BUFFER_SIZE
+            - session->unread_count
+        ) % OUTPUT_BUFFER_SIZE;
+
+    while (
+        count < size &&
+        count < session->unread_count
+    ) {
+
+        data[count++] =
+            session->output_buffer[position];
+
+        position =
+            (position + 1)
+            % OUTPUT_BUFFER_SIZE;
+    }
+
+    return count;
+}
+
+void session_mark_displayed(
+    Session *session
+)
+{
+    if (session == NULL)
+        return;
+
+    session->unread_count = 0;
+    session->has_unread_output = 0;
 }
 
 size_t session_buffer_size(

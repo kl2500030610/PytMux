@@ -53,6 +53,7 @@ static void display_scrollback(
         );
 
     if (total == 0) {
+
         printf(
             "[No scrollback available]\r\n"
         );
@@ -96,6 +97,63 @@ static void display_scrollback(
 
         position += chunk;
     }
+}
+
+static void display_unread_output(
+    Session *session
+)
+{
+    char buffer[4096];
+
+    if (session == NULL)
+        return;
+
+    size_t unread =
+        session->unread_count;
+
+    if (unread == 0)
+        return;
+
+    size_t position = 0;
+
+    while (position < unread) {
+
+        size_t remaining =
+            unread - position;
+
+        size_t chunk =
+            remaining < sizeof(buffer)
+                ? remaining
+                : sizeof(buffer);
+
+        size_t n =
+            session_buffer_peek_unread(
+                session,
+                buffer,
+                sizeof(buffer)
+            );
+
+        if (n == 0)
+            break;
+
+        if (chunk > n - position)
+            chunk = n - position;
+
+        if (write(
+                STDOUT_FILENO,
+                buffer + position,
+                chunk
+            ) == -1) {
+
+            break;
+        }
+
+        position += chunk;
+    }
+
+    session_mark_displayed(
+        session
+    );
 }
 
 static void enter_scrollback(
@@ -196,9 +254,6 @@ static int handle_command_input(
 
     *command_mode = 0;
 
-    /*
-     * Literal Ctrl-B.
-     */
     if (command.type ==
         COMMAND_LITERAL_PREFIX) {
 
@@ -221,9 +276,6 @@ static int handle_command_input(
         return 1;
     }
 
-    /*
-     * Scrollback.
-     */
     if (command.type ==
         COMMAND_SCROLLBACK) {
 
@@ -264,6 +316,16 @@ static int handle_command_input(
             );
 
         update_terminal_size(
+            active
+        );
+
+        /*
+         * When returning to a session,
+         * display only the output that
+         * arrived while that session
+         * was inactive.
+         */
+        display_unread_output(
             active
         );
     }
@@ -387,9 +449,6 @@ int main(void)
             break;
         }
 
-        /*
-         * Keyboard input.
-         */
         if (FD_ISSET(
                 STDIN_FILENO,
                 &read_fds
@@ -419,9 +478,9 @@ int main(void)
                 char ch =
                     input[i];
 
-                /*
-                 * Handle Ctrl-B and commands.
-                 */
+                int previous_session =
+                    mux.active_session;
+
                 if (handle_command_input(
                         &mux,
                         ch,
@@ -432,10 +491,12 @@ int main(void)
                     if (!running)
                         break;
 
-                    /*
-                     * Refresh active session
-                     * after a command.
-                     */
+                    if (mux.active_session !=
+                        previous_session) {
+
+                        session_switched = 1;
+                    }
+
                     active =
                         multiplexer_get_active(
                             &mux
@@ -444,10 +505,6 @@ int main(void)
                     continue;
                 }
 
-                /*
-                 * Normal input goes directly
-                 * to the current active PTY.
-                 */
                 active =
                     multiplexer_get_active(
                         &mux
@@ -470,8 +527,13 @@ int main(void)
         }
 
         /*
-         * Read output from all sessions.
+         * If the user switched sessions during
+         * this select cycle, don't print stale
+         * output from the old active session.
          */
+        if (session_switched)
+            continue;
+
         for (int i = 0;
              i < mux.session_count;
              i++) {
@@ -513,12 +575,8 @@ int main(void)
                 n
             );
 
-            if (!session_switched &&
-                session->id ==
-                    mux.active_session) {
-
-                session->has_unread_output =
-                    0;
+            if (session->id ==
+                mux.active_session) {
 
                 if (write(
                         STDOUT_FILENO,
@@ -530,6 +588,14 @@ int main(void)
 
                     break;
                 }
+
+                /*
+                 * This output was immediately
+                 * displayed, so it is not unread.
+                 */
+                session_mark_displayed(
+                    session
+                );
             }
         }
     }
