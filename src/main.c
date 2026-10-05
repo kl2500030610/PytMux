@@ -41,10 +41,6 @@ static void update_terminal_size(
     );
 }
 
-/*
- * Display the current scrollback
- * without destroying the buffer.
- */
 static void display_scrollback(
     Session *session
 )
@@ -86,6 +82,9 @@ static void display_scrollback(
         if (n == 0)
             break;
 
+        if (chunk > n - position)
+            chunk = n - position;
+
         if (write(
                 STDOUT_FILENO,
                 buffer + position,
@@ -99,15 +98,6 @@ static void display_scrollback(
     }
 }
 
-/*
- * W7 scrollback mode.
- *
- * q = exit
- * r = refresh
- *
- * The terminal remains in raw mode
- * so q is detected immediately.
- */
 static void enter_scrollback(
     Session *session
 )
@@ -141,19 +131,12 @@ static void enter_scrollback(
                1
            ) == 1) {
 
-        /*
-         * Exit immediately when q
-         * is pressed.
-         */
         if (ch == 'q' ||
             ch == 'Q') {
 
             break;
         }
 
-        /*
-         * Refresh the scrollback.
-         */
         if (ch == 'r' ||
             ch == 'R') {
 
@@ -174,15 +157,118 @@ static void enter_scrollback(
         }
     }
 
-    /*
-     * Make sure PtyMux is back
-     * in raw terminal mode.
-     */
     terminal_raw_mode();
 
     update_terminal_size(
         session
     );
+}
+
+static int handle_command_input(
+    Multiplexer *mux,
+    char ch,
+    int *command_mode,
+    int *running
+)
+{
+    if (!*command_mode &&
+        ch == 2) {
+
+        *command_mode = 1;
+
+        const char *message =
+            "\r\033[2K[PtyMux]";
+
+        write(
+            STDOUT_FILENO,
+            message,
+            13
+        );
+
+        return 1;
+    }
+
+    if (!*command_mode)
+        return 0;
+
+    Command command =
+        parse_command(ch);
+
+    *command_mode = 0;
+
+    /*
+     * Literal Ctrl-B.
+     */
+    if (command.type ==
+        COMMAND_LITERAL_PREFIX) {
+
+        Session *active =
+            multiplexer_get_active(
+                mux
+            );
+
+        if (active != NULL) {
+
+            char prefix = 2;
+
+            write(
+                active->master_fd,
+                &prefix,
+                1
+            );
+        }
+
+        return 1;
+    }
+
+    /*
+     * Scrollback.
+     */
+    if (command.type ==
+        COMMAND_SCROLLBACK) {
+
+        Session *active =
+            multiplexer_get_active(
+                mux
+            );
+
+        enter_scrollback(
+            active
+        );
+
+        return 1;
+    }
+
+    int old_session =
+        mux->active_session;
+
+    int result =
+        execute_command(
+            mux,
+            command
+        );
+
+    if (result == -1) {
+
+        *running = 0;
+
+        return 1;
+    }
+
+    if (mux->active_session !=
+        old_session) {
+
+        Session *active =
+            multiplexer_get_active(
+                mux
+            );
+
+        update_terminal_size(
+            active
+        );
+    }
+
+    return 1;
 }
 
 int main(void)
@@ -229,9 +315,6 @@ int main(void)
 
         int session_switched = 0;
 
-        /*
-         * Handle terminal resize.
-         */
         if (resize_pending) {
 
             resize_pending = 0;
@@ -258,17 +341,11 @@ int main(void)
             &read_fds
         );
 
-        /*
-         * Keyboard.
-         */
         FD_SET(
             STDIN_FILENO,
             &read_fds
         );
 
-        /*
-         * Monitor every running PTY.
-         */
         for (int i = 0;
              i < mux.session_count;
              i++) {
@@ -294,10 +371,6 @@ int main(void)
             }
         }
 
-        /*
-         * Wait for keyboard or PTY
-         * activity.
-         */
         if (select(
                 max_fd + 1,
                 &read_fds,
@@ -322,150 +395,60 @@ int main(void)
                 &read_fds
             )) {
 
-            char buffer[4096];
+            char input[4096];
 
             ssize_t n =
                 read(
                     STDIN_FILENO,
-                    buffer,
-                    sizeof(buffer)
+                    input,
+                    sizeof(input)
                 );
 
             if (n <= 0)
                 break;
+
+            Session *active =
+                multiplexer_get_active(
+                    &mux
+                );
 
             for (ssize_t i = 0;
                  i < n;
                  i++) {
 
                 char ch =
-                    buffer[i];
+                    input[i];
 
                 /*
-                 * Ctrl-B starts command mode.
+                 * Handle Ctrl-B and commands.
                  */
-                if (!command_mode &&
-                    ch == 2) {
+                if (handle_command_input(
+                        &mux,
+                        ch,
+                        &command_mode,
+                        &running
+                    )) {
 
-                    command_mode = 1;
-
-                    const char *message =
-                        "\r\033[2K[PtyMux]";
-
-                    write(
-                        STDOUT_FILENO,
-                        message,
-                        13
-                    );
-
-                    continue;
-                }
-
-                /*
-                 * Command mode.
-                 */
-                if (command_mode) {
-
-                    Command command =
-                        parse_command(
-                            ch
-                        );
-
-                    command_mode = 0;
-
-                    /*
-                     * Literal Ctrl-B.
-                     */
-                    if (command.type ==
-                        COMMAND_LITERAL_PREFIX) {
-
-                        Session *active =
-                            multiplexer_get_active(
-                                &mux
-                            );
-
-                        if (active != NULL) {
-
-                            char prefix = 2;
-
-                            write(
-                                active->master_fd,
-                                &prefix,
-                                1
-                            );
-                        }
-
-                        continue;
-                    }
-
-                    /*
-                     * Enter scrollback mode.
-                     */
-                    if (command.type ==
-                        COMMAND_SCROLLBACK) {
-
-                        Session *active =
-                            multiplexer_get_active(
-                                &mux
-                            );
-
-                        enter_scrollback(
-                            active
-                        );
-
-                        continue;
-                    }
-
-                    /*
-                     * Remember the active
-                     * session before executing
-                     * the command.
-                     */
-                    int old_session =
-                        mux.active_session;
-
-                    int result =
-                        execute_command(
-                            &mux,
-                            command
-                        );
-
-                    /*
-                     * Quit.
-                     */
-                    if (result == -1) {
-
-                        running = 0;
-
+                    if (!running)
                         break;
-                    }
 
                     /*
-                     * Detect a session switch.
+                     * Refresh active session
+                     * after a command.
                      */
-                    if (mux.active_session !=
-                        old_session) {
-
-                        session_switched = 1;
-
-                        Session *active =
-                            multiplexer_get_active(
-                                &mux
-                            );
-
-                        update_terminal_size(
-                            active
+                    active =
+                        multiplexer_get_active(
+                            &mux
                         );
-                    }
 
                     continue;
                 }
 
                 /*
-                 * Normal keyboard input goes
-                 * to the active session.
+                 * Normal input goes directly
+                 * to the current active PTY.
                  */
-                Session *active =
+                active =
                     multiplexer_get_active(
                         &mux
                     );
@@ -487,7 +470,7 @@ int main(void)
         }
 
         /*
-         * Read output from every PTY.
+         * Read output from all sessions.
          */
         for (int i = 0;
              i < mux.session_count;
@@ -524,23 +507,12 @@ int main(void)
                 continue;
             }
 
-            /*
-             * Always save output.
-             */
             session_buffer_write(
                 session,
                 buffer,
                 n
             );
 
-            /*
-             * Only display output from
-             * the active session.
-             *
-             * If a session switch happened
-             * during this select() iteration,
-             * don't display stale output.
-             */
             if (!session_switched &&
                 session->id ==
                     mux.active_session) {
